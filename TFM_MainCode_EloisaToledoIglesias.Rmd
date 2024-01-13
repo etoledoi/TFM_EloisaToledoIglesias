@@ -1,0 +1,1748 @@
+---
+title: "TFM"
+author: "Eloísa Toledo Iglesias"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r library }
+library(tidyverse)
+library(stats)
+library(ggfortify)
+library(cluster)
+library(clusterSim)
+library(factoextra)
+library(fpc)
+library(dbscan)
+library(mclust)
+library(clValid)
+library(umap)
+library(tsne)
+library(openxlsx)
+```
+
+```{r data gene expression}
+
+df_gen <- read_csv("data.csv") #Data
+
+```
+
+``` {r labels data}
+df_labels <- read.csv("labels.csv") %>% as_tibble() #Labels
+colnames(df_labels) <- c("samples", "class") #Change the name of the columns
+df_labels$class <- as.factor(df_labels$class) #Convert to factor
+
+samples <- df_labels$samples #Introduce the name of the samples in a variable
+df_samples <- as.data.frame(samples) %>% as_tibble() #Create dataframe
+
+table(df_labels$class) #Frequency of the cancer types
+```
+
+```{r exploratory analysis df_gen}
+
+dim(df_gen) #Dimensions of the dataframe
+
+count_var_types <- function(data_input) {
+  types <- sapply(data_input, class)
+  table_var_types <- table(types)
+  return(table_var_types)
+} #Sort the data by the variable type
+
+count_var_types(df_gen) #Frequency table for each variable type
+```
+
+```{r statistics}
+
+#Mean and median
+media <- apply(df_gen[2:20532], 2, mean)
+mediana <- apply(df_gen[2:20532], 2, median)
+hist(media, col = rgb(0.3,0.9,0.4,0.6) , border =  rgb(0.3,0.5,0.4,0.6), 
+     main = "Frequency of the average gene expression results", 
+     xlab = "Mean")
+hist(mediana, col = rgb(0.3,0.9,0.4,0.6) , border =  rgb(0.3,0.5,0.4,0.6), 
+     main = "Frequency of the median results of the gene expression data", 
+     xlab = "Median")
+
+#Max and min
+Sumary_vars <- list()
+Sumary_vars$min_var  <- apply(df_gen[2:20532], 2, min)
+Sumary_vars$max_var  <- apply(df_gen[2:20532], 2, max)
+Sumary_vars$hist_min <- hist(Sumary_vars$min_var,breaks = 30,
+                             col = rgb(1,0.6,0.4,0.6) , 
+                             border =  rgb(0.3,0.5,0.4,0.6), 
+                             main = "Frequency of the minimum values", 
+                             xlab = "Minimum values")
+Sumary_vars$hist_max <- hist(Sumary_vars$max_var,breaks = 30,
+                             col = rgb(1,0.6,0.4,0.6) , 
+                             border =  rgb(0.3,0.5,0.4,0.6), 
+                             main = "Frequency of the maximum values", 
+                             xlab = "Maximum values")
+
+#Standard desviation
+df_gen_1 <- df_gen[,-1] %>% as_tibble() #Delete sample columns
+gene_variability <- apply(df_gen_1, 2, sd) #sd of each gene 
+  #Data frame sd + sample column
+hist(gene_variability,
+     col = rgb(0.6,0.4,0.8,0.4) , 
+     border =  rgb(0.3,0.5,0.4,0.6), 
+     main = "Frequency of standard deviation results", 
+     xlab = "Standard deviation") #histogram of sd 
+table(gene_variability == 0) #Count of variables with sd = 0  
+```
+
+# SD = 0 data
+
+```{r data sd0}
+#Function to delete every variable with zero variability
+sd_0 <- function(x, variability){
+  gene_variability_df <- tibble(Gene = colnames(x), 
+                                  Std_Deviation = variability)
+  #Select genes with std_deviation higher than 0.5 (included)
+  sd_no0 <- gene_variability_df %>% filter(!Std_Deviation == 0)
+  df_gen2 <- x[, sd_no0$Gene] #Complete data for std_desviation != 0
+  return(df_gen2)
+}
+
+
+df_gen2 <- sd_0(df_gen_1, gene_variability) #Complete data for std_desviation 
+#!= 0, saved in environment
+
+```
+
+# PCA
+
+```{r pca}
+
+#PCA based feature extraction function
+
+pca_filter <- function(y) {
+  pca_results<- list() #List for variables names 
+  pca_results$pc <- prcomp(y) #PCA for the data frame
+  pca_results$varianza_explicada <- tibble(
+    sdev= pca_results$pc$sdev #Create a data frame with the standard desviation
+  ) %>% mutate(var_exp= sdev^2 / sum(sdev^2)*100) %>% rownames_to_column("dim") 
+  #Add another variable with the explained variance
+  pca_results$pca_var <- get_pca_var(pca_results$pc) #
+  pca_results$pca_var$variable_importance <-
+    pca_results$pca_var$contrib %>% #Add the variable contribution to the PCs 
+    #to a data frame
+    as.data.frame() %>%
+    rownames_to_column(var = "genes") %>% #Add the variable with the gene numbers
+    as_tibble() %>% #Convert to tibble
+    gather("dim", "contrib", -genes) %>% #Gather contrib with dimension 
+    mutate(dim = gsub("Dim.", "", dim), ) %>% #Delete "Dim." to leave only numbers
+    left_join(pca_results$varianza_explicada) %>% #Join to "varianza_explicada" 
+    #data frame
+    mutate(var_ponderation = contrib * var_exp/100) #Calculate the variables 
+    #importance, having into account the contribution of the variable to each PC  
+    #and the PCs' importance. It is divided by 100 because two percentages are 
+    #being multiplied
+
+  pca_results$pca_var$gen_importance <-pca_results$pca_var$variable_importance %>%
+    group_by(genes) %>% #Group by genes 
+    summarise(var_index = sum(var_ponderation,na.rm = TRUE)) %>% #Sum the weighted 
+    #variance
+    arrange(desc(var_index)) %>% #Change the order to create an index from higher
+    #explained variance to lower
+    mutate(cumsum_idx= cumsum(var_index)) %>% #Calculate the cumulative sum for the
+    #explained variance
+  mutate(selection= ifelse(cumsum_idx<95,"yes","no")) #Create a variable that 
+  #identifies as "yes" the genes of the index until the 95% of the explained 
+  #variance is reached
+
+  pca_results$pca_var$summary_selection <- pca_results$pca_var$gen_importance %>% 
+    group_by(selection)%>%count() #Group the genes by selection and count them
+  pca_results$pca_var$genes_selection <- pca_results$pca_var$gen_importance %>%
+    filter(selection =="yes") #Filter those genes with selection == yes
+  pca_results$pca_var$genes_selection_names <- pca_results$pca_var$genes_selection$genes
+  #Create a variable with the names of the selected genes
+  df_gen2 <- y[, pca_results$pca_var$genes_selection_names] %>%
+    as_tibble() #Filter the initial data frame with the selected genes
+  return(df_gen2)
+}
+
+set.seed(127)
+df_gen2_pca <- pca_filter(df_gen2) #Data filtering by PCA 
+
+```
+
+##kmeans
+
+```{r kmeans number clusters pca}
+
+# Elbow method
+elbow_kmeans_df_gen2_pca <- fviz_nbclust(df_gen2_pca, kmeans, method = "wss")
+
+#Silhouette method
+silhouette_kmeans_df_gen2_pca <- fviz_nbclust(df_gen2_pca, kmeans, 
+                                               method='silhouette')
+
+#Gap statistic method
+set.seed(127)
+
+gap_stat_kmeans <- clusGap(df_gen2_pca, FUN = kmeans, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat_kmeans)
+```
+
+```{r kmeans pca}
+#Algorithm implementation
+set.seed(127)
+
+kmeans_3 <- kmeans(df_gen2_pca, 3, nstart = 10)
+plot_kmeans_3 <- fviz_cluster(kmeans_3, data = df_gen2_pca)
+
+kmeans_6 <- kmeans(df_gen2_pca, 6, nstart = 10)
+plot_kmeans_6 <- fviz_cluster(kmeans_6, data = df_gen2_pca)
+
+kmeans_8 <- kmeans(df_gen2_pca, 8, nstart = 10)
+plot_kmeans_8 <- fviz_cluster(kmeans_8, data = df_gen2_pca)
+```
+
+```{r kmeans pca k 5}
+#Algorithm implementation
+set.seed(127)
+
+kmeans_5 <- kmeans(df_gen2_pca, 5, nstart = 10)
+plot_kmeans_5 <- fviz_cluster(kmeans_5, data = df_gen2_pca)
+
+```
+
+# K-Medoids Clustering (PAM)
+
+```{r pam number clusters pca}
+
+# Elbow method
+elbow_pam_df_gen2_pca <- fviz_nbclust(df_gen2_pca, pam, method = "wss")
+elbow_pam_df_gen2_pca
+
+#Silhouette method
+silhouette_pam_df_gen2_pca <- fviz_nbclust(df_gen2_pca, pam, 
+                                               method='silhouette')
+#Gap statistic method
+set.seed(127)
+
+gap_stat <- clusGap(df_gen2_pca, FUN = pam, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat)
+```
+
+```{r pam pca}
+#Algorithms implementation
+set.seed(127)
+
+pam_3 <- pam(df_gen2_pca, 3, nstart = 10)
+plot_pam_3 <- fviz_cluster(pam_3, data = df_gen2_pca)
+
+pam_5 <- pam(df_gen2_pca, 5, nstart = 10)
+plot_pam_5 <- fviz_cluster(pam_5, data = df_gen2_pca)
+
+pam_6 <- pam(df_gen2_pca, 6, nstart = 10)
+plot_pam_6 <- fviz_cluster(pam_6, data = df_gen2_pca)
+
+pam_8 <- pam(df_gen2_pca, 8, nstart = 10)
+plot_pam_8 <- fviz_cluster(pam_8, data = df_gen2_pca)
+```
+
+#CLARA
+
+```{r clara number clusters pca}
+# Elbow method
+elbow_clara_df_gen2_pca <- fviz_nbclust(df_gen2_pca, clara, method = "wss")
+
+#Silhouette method
+silhouette_pam_df_gen2_pca <- fviz_nbclust(df_gen2_pca, pam, 
+                                               method='silhouette')
+#Gap statistic method
+set.seed(127)
+
+gap_stat <- clusGap(df_gen2_pca, FUN = pam, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat)
+```
+
+```{r clara pca}
+#Algorithms implementation
+set.seed(127)
+
+clara_3 <- clara(df_gen2_pca, 3, samples = 10, pamLike = T)
+plot_clara_3 <- fviz_cluster(clara_3, data = df_gen2_pca)
+
+clara_5 <- clara(df_gen2_pca, 5, samples = 10, pamLike = T)
+plot_clara_5 <- fviz_cluster(clara_5, data = df_gen2_pca)
+
+clara_6 <- clara(df_gen2_pca, 6, samples = 10, pamLike = T)
+plot_clara_6 <- fviz_cluster(clara_6, data = df_gen2_pca)
+
+clara_7 <- clara(df_gen2_pca, 7, samples = 10, pamLike = T)
+plot_clara_7 <- fviz_cluster(clara_7, data = df_gen2_pca)
+
+clara_8 <- clara(df_gen2_pca, 8, samples = 10, pamLike = T)
+plot_clara_8 <- fviz_cluster(clara_8, data = df_gen2_pca)
+```
+
+# DBSCAN
+
+```{r DBSCAN}
+
+knn_dist_df_gen2_pca <- kNNdistplot(df_gen2_pca,k=5) %>%
+  abline(h=200,lty = 2) #Selecting the eps value
+
+#Algorithm implementation
+
+set.seed(127)
+
+dbscan_df_gen2_pca_1 <- dbscan(df_gen2_pca, eps=174, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca
+plot_dbscan_df_gen2_pca_1 <- fviz_cluster(dbscan_df_gen2_pca_1, df_gen2_pca, geom = "point")
+
+dbscan_df_gen2_pca_2 <- dbscan(df_gen2_pca, eps=171, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_2
+plot_dbscan_df_gen2_pca_2 <- fviz_cluster(dbscan_df_gen2_pca_2, df_gen2_pca, geom = "point")
+
+dbscan_df_gen2_pca_3 <- dbscan(df_gen2_pca, eps=165, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_3
+plot_dbscan_df_gen2_pca_3 <- fviz_cluster(dbscan_df_gen2_pca_3, df_gen2_pca, geom = "point")
+
+dbscan_df_gen2_pca_5 <- dbscan(df_gen2_pca, eps=161, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_5
+plot_dbscan_df_gen2_pca_5 <- fviz_cluster(dbscan_df_gen2_pca_5, df_gen2_pca, geom = "point")
+
+```
+
+## Hierarchical
+
+```{r hierarchical pca}
+#Agglomerative
+#Algorithms implementation
+agglo_df_gen2_pca_complete <- agnes(df_gen2_pca, method = "complete")
+agglo_df_gen2_pca_average <- agnes(df_gen2_pca, method = "average")
+agglo_df_gen2_pca_single <- agnes(df_gen2_pca, method = "single")
+agglo_df_gen2_pca_ward <- agnes(df_gen2_pca, method = "ward")
+
+#Agglomerative coefficient
+agglo_df_gen2_pca_complete$ac
+agglo_df_gen2_pca_average$ac
+agglo_df_gen2_pca_single$ac
+agglo_df_gen2_pca_ward$ac
+
+#Algorithm representation
+fviz_dend(agglo_df_gen2_pca_ward, k = 5, # Cut in four groups
+          cex = 0.5, # label size
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          )
+
+agglo_df_gen2_pca_ward_clusters <-cutree(agglo_df_gen2_pca_ward, k = 5) #Clusters
+
+#Divisive
+#Algorithms implementation
+div_df_gen2__pca <- diana(df_gen2_pca)
+div_df_gen2__pca$dcs #Divisive coefficient
+
+```
+
+## Gaussian mixture
+
+```{r gaussian mixture pca}
+
+gaussian_df_gen2_pca <- Mclust(df_gen2_pca) #Algorithms implementation
+summary(gaussian_df_gen2_pca) #summary
+ 
+fviz_mclust(gaussian_df_gen2_pca, "BIC", palette = "jco") #Model selection plot
+
+fviz_mclust(gaussian_df_gen2_pca, "classification", geom = "point", 
+            pointsize = 1.5, palette = "jco") #Representation
+
+gaussian_df_gen2_pca_clusters <- gaussian_df_gen2_pca$classification #Clusters
+```
+
+## Internal evaluation
+
+```{r Davies - Bouldin pca}
+
+DB_results<- list()
+dist_df_gen2_pca <- dist(df_gen2_pca) #Distance matrix, used for calculations
+#if centrotypes = "medoids"
+
+#kmeans
+
+## k = 3
+DB_results$kmeans_3 <- index.DB(df_gen2_pca, kmeans_3$cluster, centrotypes="centroids")
+DB_results$kmeans_3$DB
+
+## k = 5
+DB_results$kmeans_5 <- index.DB(df_gen2_pca, kmeans_5$cluster, centrotypes="centroids")
+DB_results$kmeans_5$DB
+
+## k = 6
+DB_results$kmeans_6 <- index.DB(df_gen2_pca, kmeans_6$cluster, centrotypes="centroids")
+DB_results$kmeans_6$DB
+
+## k = 8
+DB_results$kmeans_8 <- index.DB(df_gen2_pca, kmeans_8$cluster, centrotypes="centroids")
+DB_results$kmeans_8$DB
+
+#PAM
+
+## k = 3
+DB_results$pam_3 <- index.DB(df_gen2_pca, pam_3$clustering, dist_df_gen2_pca,
+                             centrotypes="medoids")
+DB_results$pam_3$DB
+
+## k = 5
+DB_results$pam_5 <- index.DB(df_gen2_pca, pam_5$clustering, dist_df_gen2_pca, 
+                             centrotypes="medoids")
+DB_results$pam_5$DB
+
+## k = 6
+DB_results$pam_6 <- index.DB(df_gen2_pca, pam_6$clustering, dist_df_gen2_pca, 
+                             centrotypes="medoids")
+DB_results$pam_6$DB
+## k = 8
+DB_results$pam_8 <- index.DB(df_gen2_pca, pam_8$clustering, dist_df_gen2_pca, 
+                             centrotypes="medoids")
+DB_results$pam_8$DB
+
+#CLARA
+
+## k = 3
+DB_results$clara_3 <- index.DB(df_gen2_pca, clara_3$clustering, dist_df_gen2_pca, 
+                               centrotypes="medoids")
+DB_results$clara_3$DB
+
+## k = 5
+DB_results$clara_5 <- index.DB(df_gen2_pca, clara_5$clustering,dist_df_gen2_pca, 
+                               centrotypes="medoids")
+DB_results$clara_5$DB
+
+## k = 6
+DB_results$clara_6 <- index.DB(df_gen2_pca, clara_6$clustering, dist_df_gen2_pca, 
+                               centrotypes="medoids")
+DB_results$clara_6$DB
+
+## k = 7
+DB_results$clara_7 <- index.DB(df_gen2_pca, clara_7$clustering, dist_df_gen2_pca, 
+                               centrotypes="medoids")
+DB_results$clara_6$DB
+
+## k = 8
+DB_results$clara_8 <- index.DB(df_gen2_pca, clara_8$clustering, dist_df_gen2_pca, 
+                               centrotypes="medoids")
+DB_results$clara_8$DB
+
+```
+
+```{r Calinski - Harabasz pca}
+
+calinski_results <- list()
+
+#kmeans
+
+## k = 3
+calinski_results$kmeans_3 <- calinhara(df_gen2_pca, kmeans_3$cluster)
+
+## k = 5
+calinski_results$kmeans_5 <- calinhara(df_gen2_pca, kmeans_5$cluster)
+
+## k = 6
+calinski_results$kmeans_6 <- calinhara(df_gen2_pca, kmeans_6$cluster)
+
+## k = 8
+calinski_results$kmeans_8 <- calinhara(df_gen2_pca, kmeans_8$cluster)
+
+#PAM
+
+## k = 3
+calinski_results$pam_3 <- calinhara(df_gen2_pca, pam_3$clustering)
+
+## k = 5
+calinski_results$pam_5 <- calinhara(df_gen2_pca, pam_5$clustering)
+
+## k = 6
+calinski_results$pam_6 <- calinhara(df_gen2_pca, pam_6$clustering)
+
+## k = 8
+calinski_results$pam_8 <- calinhara(df_gen2_pca, pam_8$clustering)
+
+#CLARA
+
+## k = 3
+calinski_results$clara_3 <- calinhara(df_gen2_pca, clara_3$clustering)
+
+## k = 5
+calinski_results$clara_5 <- calinhara(df_gen2_pca, clara_5$clustering)
+
+## k = 6
+calinski_results$clara_6 <- calinhara(df_gen2_pca, clara_6$clustering)
+
+## k = 7
+calinski_results$clara_7 <- calinhara(df_gen2_pca, clara_7$clustering)
+
+## k = 8
+calinski_results$clara_8 <- calinhara(df_gen2_pca, clara_8$clustering)
+
+#DBScan
+
+## eps 174
+calinski_results_pca$dbscan_174 <- calinhara(df_gen2_pca, dbscan_df_gen2_pca_1$cluster)
+
+## eps 171
+calinski_results_pca$dbscan_171 <- calinhara(df_gen2_pca, dbscan_df_gen2_pca_2$cluster)
+
+## eps 165
+calinski_results_pca$dbscan_165 <- calinhara(df_gen2_pca, dbscan_df_gen2_pca_3$cluster)
+
+## eps 161
+calinski_results_pca$dbscan_161 <- calinhara(df_gen2_pca, dbscan_df_gen2_pca_5$cluster)
+
+# Hierarchical
+calinski_results$agglo_pca <- calinhara(df_gen2_pca, agglo_df_gen2_pca_ward_clusters)
+
+# Gaussian mixture
+calinski_results_pca$gaussian <- calinhara(df_gen2_pca, gaussian_df_gen2_pca$classification)
+```
+
+```{r clValid pca}
+
+df_gen2_pca <- data.frame(df_gen2_pca) #Convert to dataframe
+
+#Internal
+
+clValid_results_pca <- clValid(df_gen2_pca, nClust = 3:9,
+              clMethods = c("kmeans", "pam", "clara", "hierarchical", "model"),
+              validation = "internal", maxitems = 801)
+summary(clValid_results_pca) #Summary of the internal parameters
+
+#Connectivity dbscan
+
+# eps 174
+connectivity(distance = dist_df_gen2_pca, dbscan_df_gen2_pca_1$cluster, 
+             Data = df_gen2_pca)
+# eps 171
+connectivity(distance = dist_df_gen2_pca, dbscan_df_gen2_pca_2$cluster, 
+             Data = df_gen2_pca)
+# eps 165
+connectivity(distance = dist_df_gen2_pca, dbscan_df_gen2_pca_3$cluster, 
+             Data = df_gen2_pca)
+# eps 161
+connectivity(distance = dist_df_gen2_pca, dbscan_df_gen2_pca_5$cluster, 
+             Data = df_gen2_pca)
+#Dunn dbscan
+
+# eps 174
+dunn(dist_df_gen2_pca, dbscan_df_gen2_pca_1$cluster, df_gen2_pca)
+
+# eps 171
+dunn(dist_df_gen2_pca, dbscan_df_gen2_pca_2$cluster, df_gen2_pca)
+
+# eps 165
+dunn(dist_df_gen2_pca, dbscan_df_gen2_pca_3$cluster, df_gen2_pca)
+
+# eps 161
+dunn(dist_df_gen2_pca, dbscan_df_gen2_pca_5$cluster, df_gen2_pca)
+
+#Silhouette dbscan
+
+# eps 174
+summary(silhouette(dbscan_df_gen2_pca_1$cluster, dist_df_gen2_pca))
+
+# eps 171
+summary(silhouette(dbscan_df_gen2_pca_2$cluster, dist_df_gen2_pca))
+
+# eps 165
+summary(silhouette(dbscan_df_gen2_pca_3$cluster, dist_df_gen2_pca))
+
+# eps 161
+summary(silhouette(dbscan_df_gen2_pca_5$cluster, dist_df_gen2_pca))
+```
+
+## Classification assessment
+
+```{r classification function}
+
+classification_function <- function(df1, df2) {
+  coincidencias <- 0 #Variable initialization
+  no_coincidencias <- 0 #Variable initialization
+  check <- 0 #Variable initialization
+  check_result <- data.frame() #Data frame initialization
+  # Loop para comparar
+  for(nivel in levels(df2$class)){ #For each cluster in the algorithm result
+    for (level in levels(df1$class)){ #For each group in the original data
+      coincidencias <- 0 #Restart variable 
+      no_coincidencias <- 0 #Restart variable
+      check <- 0 #Restart variable
+      df1_loop <- df1[df1$class == level, ] #Select the df1 data for that level
+      df2_loop <- df2[df2$class == nivel, ] #Select the df2 data for that "nivel"
+      for (i in 1:nrow(df1_loop)) { #Create a loop that add 1 to coincidencias 
+        #if the line i in df1 is equal to one of the lines of df2
+        for (j in 1:nrow(df2_loop)){
+          if (identical(df1_loop$samples[i], df2_loop$samples[j])) {
+            coincidencias <- coincidencias + 1
+          } 
+        }  
+        if (check == coincidencias){ #If in the previous loop there was no
+          #addition, then add 1 to coincidencias 
+          no_coincidencias <- no_coincidencias + 1
+        }
+        check <- coincidencias #Equal coincidencias to check to enter the next 
+        #iteration of the loop
+      }
+    #Create data frame con los resultados
+    check_result_0 <- data.frame("labels_data_cancer" = level,
+                                 "labels_cluster_algorithm" = nivel,
+                                 "coincidences" = coincidencias,
+                                 "no_coincidences" = no_coincidencias)
+    check_result <- rbind(check_result, check_result_0)
+    }
+  } 
+  return(check_result)
+}
+
+```
+
+``` {r kmeans classification evaluation pca}
+#Classification function implementation
+
+## k = 3
+labels_kmeans_3_pca <- data.frame("samples" = samples, "class" = kmeans_3$cluster)
+labels_kmeans_3_pca$class <- as.factor(labels_kmeans_3_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_3_pca), 
+           "classification/pca_kmeans_3.xlsx")
+
+## k = 5
+labels_kmeans_5_pca <- data.frame("samples" = samples, "class" = kmeans_5$cluster)
+labels_kmeans_5_pca$class <- as.factor(labels_kmeans_5_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_5_pca), 
+           "classification/pca_kmeans_5.xlsx")
+
+## k = 6
+labels_kmeans_6_pca <- data.frame("samples" = samples, "class" = kmeans_6$cluster)
+labels_kmeans_6_pca$class <- as.factor(labels_kmeans_6_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_6_pca), 
+           "classification/pca_kmeans_6.xlsx")
+
+## k = 8
+labels_kmeans_8_pca <- data.frame("samples" = samples, "class" = kmeans_8$cluster)
+labels_kmeans_8_pca$class <- as.factor(labels_kmeans_8_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_8_pca), 
+           "classification/pca_kmeans_8.xlsx")
+
+```
+
+``` {r pam classification evaluation pca}
+#Classification function implementation
+
+## k = 3
+labels_pam_3_pca <- data.frame("samples" = samples, "class" = pam_3$cluster)
+labels_pam_3_pca$class <- as.factor(labels_pam_3_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_3_pca), 
+           "classification/pca_pam_3.xlsx")
+
+## k = 5
+labels_pam_5_pca <- data.frame("samples" = samples, "class" = pam_5$cluster)
+labels_pam_5_pca$class <- as.factor(labels_pam_5_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_5_pca), 
+           "classification/pca_pam_5.xlsx")
+
+## k = 6
+labels_pam_6_pca <- data.frame("samples" = samples, "class" = pam_6$cluster)
+labels_pam_6_pca$class <- as.factor(labels_pam_6_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_6_pca), 
+           "classification/pca_pam_6.xlsx")
+
+## k = 8
+labels_pam_8_pca <- data.frame("samples" = samples, "class" = pam_8$cluster)
+labels_pam_8_pca$class <- as.factor(labels_pam_8_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_8_pca), 
+           "classification/pca_pam_8.xlsx")
+```
+
+``` {r clara classification evaluation pca}
+#Classification function implementation
+
+## k = 3
+labels_clara_3_pca <- data.frame("samples" = samples, "class" = clara_3$cluster)
+labels_clara_3_pca$class <- as.factor(labels_clara_3_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_3_pca), 
+           "classification/pca_clara_3.xlsx")
+
+## k = 5
+labels_clara_5_pca <- data.frame("samples" = samples, "class" = clara_5$cluster)
+labels_clara_5_pca$class <- as.factor(labels_clara_5_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_5_pca), 
+           "classification/pca_clara_5.xlsx")
+
+## k = 6
+labels_clara_6_pca <- data.frame("samples" = samples, "class" = clara_6$cluster)
+labels_clara_6_pca$class <- as.factor(labels_clara_6_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_6_pca), 
+           "classification/pca_clara_6.xlsx")
+
+## k = 7
+labels_clara_7_pca <- data.frame("samples" = samples, "class" = clara_7$cluster)
+labels_clara_7_pca$class <- as.factor(labels_clara_7_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_7_pca), 
+           "classification/pca_clara_7.xlsx")
+
+## k = 8
+labels_clara_8_pca <- data.frame("samples" = samples, "class" = clara_8$cluster)
+labels_clara_8_pca$class <- as.factor(labels_clara_8_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_8_pca), 
+           "classification/pca_clara_8.xlsx")
+```
+
+``` {r DBSCAN classification evaluation pca}
+#Classification function implementation
+
+# eps 161
+labels_dbscan_161_pca <- data.frame("samples" = samples, 
+                                    "class" = dbscan_df_gen2_pca_5$cluster)
+labels_dbscan_161_pca$class <- as.factor(labels_dbscan_161_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_161_pca), 
+           "classification/pca_dbscan_161.xlsx")
+
+# eps 165
+labels_dbscan_165_pca <- data.frame("samples" = samples, 
+                                    "class" = dbscan_df_gen2_pca_3$cluster)
+labels_dbscan_165_pca$class <- as.factor(labels_dbscan_165_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_165_pca), 
+           "classification/pca_dbscan_165.xlsx")
+
+# eps 171
+
+labels_dbscan_171_pca <- data.frame("samples" = samples, 
+                                    "class" = dbscan_df_gen2_pca_2$cluster)
+labels_dbscan_171_pca$class <- as.factor(labels_dbscan_171_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_171_pca), 
+           "classification/pca_dbscan_171.xlsx")
+
+# eps 174
+
+labels_dbscan_174_pca <- data.frame("samples" = samples, 
+                                    "class" = dbscan_df_gen2_pca_1$cluster)
+labels_dbscan_174_pca$class <- as.factor(labels_dbscan_174_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_174_pca), 
+           "classification/pca_dbscan_175.xlsx")
+```
+
+``` {r hierarchical classification evaluation pca}
+#Classification function implementation
+labels_agglo_pca <- data.frame("samples" = samples, 
+                               "class" = agglo_df_gen2_pca_ward_clusters)
+labels_agglo_pca$class <- as.factor(labels_agglo_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_agglo_pca), 
+           "classification/pca_agglo.xlsx")
+
+```
+
+``` {r gaussian classification evaluation pca}
+#Classification function implementation
+labels_gaussian_pca <- data.frame("samples" = samples, 
+                                  "class" = gaussian_df_gen2_pca$classification)
+labels_gaussian_pca$class <- as.factor(labels_gaussian_pca$class)
+
+write.xlsx(classification_function(df_labels, labels_gaussian_pca), 
+           "classification/pca_gaussian.xlsx")
+
+```
+
+# PCA_800
+
+```{r pca 800}
+
+#PCA based feature extraction function for selecting the 800 most relevant v
+#variables
+
+pca_filter <- function(y) {
+  pca_results<- list() #List for variables names 
+  pca_results$pc <- prcomp(y) #PCA for the data frame
+  pca_results$varianza_explicada <- tibble(
+    sdev= pca_results$pc$sdev #Create a data frame with the standard desviation
+  ) %>% mutate(var_exp= sdev^2 / sum(sdev^2)*100) %>% rownames_to_column("dim") 
+  #Add another variable with the explained variance
+  pca_results$pca_var <- get_pca_var(pca_results$pc) 
+  pca_results$pca_var$variable_importance <-
+    pca_results$pca_var$contrib %>% #Add the variable contribution to the PCs 
+    #to a data frame
+    as.data.frame() %>%
+    rownames_to_column(var = "genes") %>% #Add the variable with the gene numbers
+    as_tibble() %>% #Convert to tibble
+    gather("dim", "contrib", -genes) %>% #Gather contrib with dimension 
+    mutate(dim = gsub("Dim.", "", dim), ) %>% #Delete "Dim." to leave only numbers
+    left_join(pca_results$varianza_explicada) %>% #Join to "varianza_explicada" 
+    #data frame
+    mutate(var_ponderation = contrib * var_exp/100) #Calculate the variables 
+    #importance, having into account the contribution of the variable to each PC  
+    #and the PCs' importance. It is divided by 100 because two percentages are 
+    #being multiplied
+
+  pca_results$pca_var$gen_importance <-pca_results$pca_var$variable_importance %>%
+    group_by(genes) %>% #Group by genes 
+    summarise(var_index = sum(var_ponderation,na.rm = TRUE)) %>% #Sum the weighted 
+    #variance
+    arrange(desc(var_index)) #Change the order to create an index from higher
+    #explained variance to lower
+    
+  pca_results$pca_var$genes_selection <- pca_results$pca_var$gen_importance[1:800,]
+    #Filter those genes with selection == yes
+  pca_results$pca_var$genes_selection_names <- pca_results$pca_var$genes_selection$genes
+  #Create a variable with the names of the selected genes
+  df_gen2_800 <- y[, pca_results$pca_var$genes_selection_names] %>%
+    as_tibble() #Filter the initial data frame with the selected genes
+  return(df_gen2_800)
+}
+
+set.seed(127)
+df_gen2_pca_800 <- pca_filter(df_gen2) #Data filtering by PCA 
+
+```
+
+## kmeans
+
+```{r pca_800 number clusters kmeans}
+#Elbow method
+elbow_kmeans_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, kmeans, method = "wss")
+
+#Silhoette method
+silhouette_kmeans_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, kmeans, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_kmeans_pca_800 <- clusGap(df_gen2_pca_800, FUN = kmeans, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat_kmeans_pca_800)
+```
+
+```{r kmeans pca_800}
+#Algorithm implementation
+set.seed(127) 
+
+kmeans_5_pca_800 <- kmeans(df_gen2_pca_800, 5, nstart = 10)
+plot_kmeans_5_pca_800 <- fviz_cluster(kmeans_5_pca_800, data = df_gen2_pca_800)
+
+kmeans_6_pca_800 <- kmeans(df_gen2_pca_800, 6, nstart = 10)
+plot_kmeans_6_pca_800 <- fviz_cluster(kmeans_6_pca_800, data = df_gen2_pca_800)
+
+kmeans_9_pca_800 <- kmeans(df_gen2_pca_800, 9, nstart = 10)
+plot_kmeans_9_pca_800 <- fviz_cluster(kmeans_9_pca_800, data = df_gen2_pca_800)
+
+```
+
+## PAM
+
+```{r pca_800 number clusters pam}
+#Elbow method
+elbow_pam_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, pam, method = "wss")
+
+#Silhoette method
+silhouette_pam_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, pam, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_pam_pca_800 <- clusGap(df_gen2_pca_800, FUN = pam, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat_pam_pca_800)
+```
+
+```{r pam pca_800}
+#Algorithm implementation
+set.seed(127)
+
+pam_5_pca_800 <- pam(df_gen2_pca_800, 5, nstart = 10)
+plot_pam_5_pca_800  <- fviz_cluster(pam_5_pca_800, data = df_gen2_pca_800)
+
+pam_6_pca_800  <- pam(df_gen2_pca_800, 6, nstart = 10)
+plot_pam_6_pca_800  <- fviz_cluster(pam_6_pca_800, data = df_gen2_pca_800)
+
+pam_9_pca_800 <- pam(df_gen2_pca_800, 9, nstart = 10)
+plot_pam_9_pca_800  <- fviz_cluster(pam_9_pca_800, data = df_gen2_pca_800)
+```
+
+## CLARA
+
+```{r pca_800 number clusters clara}
+#Elbow method
+elbow_clara_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, clara, method = "wss")
+
+#Silhoette method
+silhouette_clara_df_gen2_pca_800 <- fviz_nbclust(df_gen2_pca_800, clara, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_clara_pca_800 <- fviz_nbclust(df_gen2_pca_800, FUNcluster = clara, 
+                               method = "gap_stat", k.max = 10, nboot = 2)
+
+plot(gap_stat_clara_pca_800)
+```
+
+```{r clara pca_800}
+#Algorithm implementation
+set.seed(127)
+
+clara_5_pca_800 <- clara(df_gen2_pca_800, 5, samples = 10, pamLike = T)
+plot_clara_5_pca_800 <- fviz_cluster(clara_5_pca_800, data = df_gen2_pca_800)
+
+clara_6_pca_800 <- clara(df_gen2_pca_800, 6, samples = 10, pamLike = T)
+plot_clara_6_pca_800 <- fviz_cluster(clara_6_pca_800, data = df_gen2_pca_800)
+
+clara_9_pca_800 <- clara(df_gen2_pca_800, 9, samples = 10, pamLike = T)
+plot_clara_9_pca_800 <- fviz_cluster(clara_9_pca_800, data = df_gen2_pca_800)
+```
+
+## DBSCAN
+
+```{r DBSCAN pca_800}
+
+knn_dist_df_gen2_pca_800_k5 <- kNNdistplot(df_gen2_pca_800,k=5) %>%
+  abline(h=85,lty = 2) #Selecting the eps value
+
+knn_dist_df_gen2_pca_800_k6 <- kNNdistplot(df_gen2_pca_800,k=6) %>%
+  abline(h=85,lty = 2) #Selecting the eps value
+
+#Algorithm implementation
+
+set.seed(127)
+
+dbscan_df_gen2_pca_800_1 <- dbscan(df_gen2_pca_800, eps=85, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_800_1
+plot_dbscan_df_gen2_pca_800_1 <- fviz_cluster(dbscan_df_gen2_pca_800_1, df_gen2_pca_800, geom = "point")
+
+dbscan_df_gen2_pca_800_2 <- dbscan(df_gen2_pca_800, eps=80, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_800_2
+plot_dbscan_df_gen2_pca_800_2 <- fviz_cluster(dbscan_df_gen2_pca_800_2, df_gen2_pca_800, geom = "point")
+
+dbscan_df_gen2_pca_800_3 <- dbscan(df_gen2_pca_800, eps=97, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_pca_800_3
+plot_dbscan_df_gen2_pca_800_3 <- fviz_cluster(dbscan_df_gen2_pca_800_3, df_gen2_pca_800, geom = "point")
+
+```
+
+## Hierarchical
+
+```{r hierarchical pca_800}
+#Agglomerative
+#Algorithm implementation
+agglo_df_gen2_pca_800_complete <- agnes(df_gen2_pca_800, method = "complete")
+agglo_df_gen2_pca_800_average <- agnes(df_gen2_pca_800, method = "average")
+agglo_df_gen2_pca_800_single <- agnes(df_gen2_pca_800, method = "single")
+agglo_df_gen2_pca_800_ward <- agnes(df_gen2_pca_800, method = "ward")
+
+#Agglomerative coefficients
+agglo_df_gen2_pca_800_complete$ac
+agglo_df_gen2_pca_800_average$ac
+agglo_df_gen2_pca_800_single$ac
+agglo_df_gen2_pca_800_ward$ac
+
+fviz_dend(agglo_df_gen2_pca_800_ward, k = 6, # Cut in four groups
+          cex = 0.5, # label size
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          ) #Representation
+
+#Clusters
+agglo_df_gen2_pca_800_ward_clusters <-cutree(agglo_df_gen2_pca_800_ward, k = 6) 
+
+#Divisive
+#Algorithm implementation
+div_df_gen2__pca_800 <- diana(df_gen2_pca_800)
+div_df_gen2__pca_800$dc #Divisive coefficient
+```
+
+## Gaussian mixture
+
+```{r gaussian mixture pca_800}
+
+gaussian_df_gen2_pca_800 <- Mclust(df_gen2_pca_800) #Algorithm implementation
+summary(gaussian_df_gen2_pca_800) #summary
+ 
+fviz_mclust(gaussian_df_gen2_pca_800, "BIC", palette = "jco") #Model selection plot
+
+
+fviz_mclust(gaussian_df_gen2_pca_800, "classification", geom = "point", 
+            pointsize = 1.5, palette = "jco") #Representation
+
+gaussian_df_gen2_pca_800_clusters <- gaussian_df_gen2_pca_800$classification #Clusters
+```
+
+## Internal evaluation
+
+```{r Davies - Bouldin pca_800}
+
+DB_results_pca_800<- list()
+dist_df_gen2_pca_800 <- dist(df_gen2_pca_800) #Distance matrix, used for calculations
+#if centrotypes = "medoids"
+
+#kmeans
+
+## k = 5
+DB_results_pca_800$kmeans_5 <- index.DB(df_gen2_pca_800, kmeans_5_pca_800$cluster, 
+                                     centrotypes="centroids")
+DB_results_pca_800$kmeans_5$DB
+
+## k = 6
+DB_results_pca_800$kmeans_6 <- index.DB(df_gen2_pca_800, kmeans_6_pca_800$cluster, 
+                                     centrotypes="centroids")
+DB_results_pca_800$kmeans_6$DB
+
+## k = 9
+DB_results_pca_800$kmeans_9 <- index.DB(df_gen2_pca_800, kmeans_9_pca_800$cluster, 
+                                     centrotypes="centroids")
+DB_results_pca_800$kmeans_9$DB
+
+#PAM
+
+## k = 5
+DB_results_pca_800$pam_5_pca_800 <- index.DB(df_gen2_pca_800, pam_5_pca_800$clustering, 
+                                       dist_df_gen2_pca_800, centrotypes="medoids")
+DB_results_pca_800$pam_5_pca_800$DB
+
+## k = 6
+DB_results_pca_800$pam_6_pca_800 <- index.DB(df_gen2_pca_800, pam_6_pca_800$clustering, 
+                             dist_df_gen2_pca_800, centrotypes="medoids")
+DB_results_pca_800$pam_6_pca_800$DB
+
+## k = 9
+DB_results_pca_800$pam_9_pca_800 <- index.DB(df_gen2_pca_800, pam_9_pca_800$clustering, 
+                             dist_df_gen2_pca_800, centrotypes="medoids")
+DB_results_pca_800$pam_9_pca_800$DB
+
+#CLARA
+
+## k = 5
+DB_results_pca_800$clara_5_pca_800 <- index.DB(df_gen2_pca_800,
+                                               clara_5_pca_800$clustering,
+                                               dist_df_gen2_pca_800,
+                                               centrotypes="medoids")
+DB_results_pca_800$clara_5_pca_800$DB
+
+## k = 6
+DB_results_pca_800$clara_6_pca_800 <- index.DB(df_gen2_pca_800,
+                                               clara_6_pca_800$clustering,
+                                               dist_df_gen2_pca_800,
+                                               centrotypes="medoids")
+DB_results_pca_800$clara_6_pca_800$DB
+
+## k = 9
+DB_results_pca_800$clara_9_pca_800 <- index.DB(df_gen2_pca_800,
+                                               clara_9_pca_800$clustering,
+                                               dist_df_gen2_pca_800,
+                                               centrotypes="medoids")
+DB_results_pca_800$clara_9_pca_800$DB
+
+```
+
+```{r Calinski - Harabasz pca_800}
+
+calinski_results_pca_800<- list()
+
+#kmeans
+
+## k = 5
+calinski_results_pca_800$kmeans_5_pca_800 <- calinhara(df_gen2_pca_800, kmeans_5_pca_800$cluster)
+
+## k = 6
+calinski_results_pca_800$kmeans_6_pca_800 <- calinhara(df_gen2_pca_800, kmeans_6_pca_800$cluster)
+
+## k = 9
+calinski_results_pca_800$kmeans_9_pca_800 <- calinhara(df_gen2_pca_800, kmeans_9_pca_800$cluster)
+
+#PAM
+
+## k = 5
+calinski_results_pca_800$pam_5_pca_800 <- calinhara(df_gen2_pca_800, pam_5_pca_800$clustering)
+
+## k = 6
+calinski_results_pca_800$pam_6_pca_800 <- calinhara(df_gen2_pca_800, pam_6_pca_800$clustering)
+
+## k = 9
+calinski_results_pca_800$pam_9_pca_800 <- calinhara(df_gen2_pca_800, pam_9_pca_800$clustering)
+
+#CLARA
+
+## k = 5
+calinski_results_pca_800$clara_5_pca_800 <- calinhara(df_gen2_pca_800, clara_5_pca_800$clustering)
+
+## k = 6
+calinski_results_pca_800$clara_6_pca_800 <- calinhara(df_gen2_pca_800, clara_6_pca_800$clustering)
+
+## k = 9
+calinski_results_pca_800$clara_9_pca_800 <- calinhara(df_gen2_pca_800, clara_9_pca_800$clustering)
+
+#DBScan
+
+## eps 85
+calinski_results_pca_800$dbscan_85_pca_800 <- calinhara(df_gen2_pca_800, dbscan_df_gen2_pca_800_1$cluster)
+
+## eps 80
+calinski_results_pca_800$dbscan_80_pca_800 <- calinhara(df_gen2_pca_800, dbscan_df_gen2_pca_800_2$cluster)
+
+## eps 97
+calinski_results_pca_800$dbscan_97_pca_800 <- calinhara(df_gen2_pca_800, dbscan_df_gen2_pca_800_3$cluster)
+
+# Hierarchical
+calinski_results_pca_800$agglo_pca_800 <- calinhara(df_gen2_pca_800, agglo_df_gen2_pca_800_ward_clusters)
+
+# Gaussian mixture
+calinski_results_pca_800$gaussian_pca_800 <- calinhara(df_gen2_pca_800, gaussian_df_gen2_pca_800$classification)
+```
+
+```{r clValid pca_800}
+
+df_gen2_pca_800 <- data.frame(df_gen2_pca_800) #Convert to dataframe
+
+#Internal
+
+clValid_results_pca_800 <- clValid(df_gen2_pca_800, nClust = 5:9,
+              clMethods = c("kmeans", "pam", "clara", "agnes", "model"),
+              validation = "internal", maxitems = 801) #Internal evaluation
+summary(clValid_results_pca_800) #Summary of the internal parameters
+
+#Connectivity dbscan
+
+# eps 85
+connectivity(distance = dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_1$cluster, 
+             Data = df_gen2_pca_800)
+# eps 80
+connectivity(distance = dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_2$cluster, 
+             Data = df_gen2_pca_800)
+# eps 97
+connectivity(distance = dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_3$cluster, 
+             Data = df_gen2_pca_800)
+#Dunn dbscan
+
+# eps 85
+dunn(dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_1$cluster, df_gen2_pca_800)
+
+# eps 80
+dunn(dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_2$cluster, df_gen2_pca_800)
+
+# eps 97
+dunn(dist_df_gen2_pca_800, dbscan_df_gen2_pca_800_3$cluster, df_gen2_pca_800)
+
+#Silhouette dbscan
+
+# eps 85
+summary(silhouette(dbscan_df_gen2_pca_800_1$cluster, dist_df_gen2_pca_800))
+
+# eps 80
+summary(silhouette(dbscan_df_gen2_pca_800_2$cluster, dist_df_gen2_pca_800))
+
+# eps 97
+summary(silhouette(dbscan_df_gen2_pca_800_3$cluster, dist_df_gen2_pca_800))
+```
+
+
+## Classification assessment
+
+``` {r kmeans classification evaluation pca_800}
+#Classification function implementation
+## k = 5
+labels_kmeans_5_pca_800 <- data.frame("samples" = samples, "class" = kmeans_5_pca_800$cluster)
+labels_kmeans_5_pca_800$class <- as.factor(labels_kmeans_5_pca_800$class)
+table(kmeans_9_pca_800$cluster)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_5_pca_800), "classification/pca_800_kmeans_5.xlsx")
+
+## k = 6
+labels_kmeans_6_pca_800 <- data.frame("samples" = samples, "class" = kmeans_6_pca_800$cluster)
+labels_kmeans_6_pca_800$class <- as.factor(labels_kmeans_6_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_6_pca_800), "classification/pca_800_kmeans_6.xlsx")
+
+## k = 9
+labels_kmeans_9_pca_800 <- data.frame("samples" = samples, "class" = kmeans_9_pca_800$cluster)
+labels_kmeans_9_pca_800$class <- as.factor(labels_kmeans_9_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_9_pca_800), "classification/pca_800_kmeans_9.xlsx")
+
+```
+
+``` {r pam classification evaluation pca_800}
+#Classification function implementation
+## k = 5
+labels_pam_5_pca_800 <- data.frame("samples" = samples, "class" = pam_5_pca_800$cluster)
+labels_pam_5_pca_800$class <- as.factor(labels_pam_5_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_5_pca_800), "classification/pca_800_pam_5.xlsx")
+
+## k = 6
+labels_pam_6_pca_800 <- data.frame("samples" = samples, "class" = pam_6_pca_800$cluster)
+labels_pam_6_pca_800$class <- as.factor(labels_pam_6_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_6_pca_800), "classification/pca_800_pam_6.xlsx")
+
+## k = 9
+labels_pam_9_pca_800 <- data.frame("samples" = samples, "class" = pam_9_pca_800$cluster)
+labels_pam_9_pca_800$class <- as.factor(labels_pam_9_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_9_pca_800), "classification/pca_800_pam_9.xlsx")
+```
+
+``` {r clara classification evaluation pca_800}
+#Classification function implementation
+## k = 5
+labels_clara_5_pca_800 <- data.frame("samples" = samples, "class" = clara_5_pca_800$cluster)
+labels_clara_5_pca_800$class <- as.factor(labels_clara_5_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_5_pca_800), "classification/pca_800_clara_5.xlsx")
+
+## k = 6
+labels_clara_6_pca_800 <- data.frame("samples" = samples, "class" = clara_6_pca_800$cluster)
+labels_clara_6_pca_800$class <- as.factor(labels_clara_6_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_6_pca_800), "classification/pca_800_clara_6.xlsx")
+
+## k = 9
+labels_clara_9_pca_800 <- data.frame("samples" = samples, "class" = clara_9_pca_800$cluster)
+labels_clara_9_pca_800$class <- as.factor(labels_clara_9_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_9_pca_800), "classification/pca_800_clara_9.xlsx")
+```
+
+``` {r DBSCAN classification evaluation pca_800}
+#Classification function implementation
+# eps 85
+labels_dbscan_85_pca_800 <- data.frame("samples" = samples, "class" = dbscan_df_gen2_pca_800_1$cluster)
+labels_dbscan_85_pca_800$class <- as.factor(labels_dbscan_85_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_85_pca_800), "classification/pca_800_dbscan_85.xlsx")
+
+# eps 80
+labels_dbscan_80_pca_800 <- data.frame("samples" = samples, "class" = dbscan_df_gen2_pca_800_2$cluster)
+labels_dbscan_80_pca_800$class <- as.factor(labels_dbscan_80_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_80_pca_800), "classification/pca_800_dbscan_80.xlsx")
+
+# eps 97
+
+labels_dbscan_97_pca_800 <- data.frame("samples" = samples, "class" = dbscan_df_gen2_pca_800_3$cluster)
+labels_dbscan_97_pca_800$class <- as.factor(labels_dbscan_97_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_97_pca_800), "classification/pca_800_dbscan_97.xlsx")
+```
+
+``` {r hierarchical classification evaluation pca_800}
+#Classification function implementation
+labels_agglo_pca_800 <- data.frame("samples" = samples, "class" = agglo_df_gen2_pca_800_ward_clusters)
+labels_agglo_pca_800$class <- as.factor(labels_agglo_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_agglo_pca_800), "classification/pca_800_agglo.xlsx")
+
+```
+
+``` {r gaussian classification evaluation pca_800}
+#Classification function implementation
+labels_gaussian_pca_800 <- data.frame("samples" = samples, "class" = gaussian_df_gen2_pca_800$classification)
+labels_gaussian_pca_800$class <- as.factor(labels_gaussian_pca_800$class)
+
+write.xlsx(classification_function(df_labels, labels_gaussian_pca_800), "classification/pca_800_gaussian.xlsx")
+
+```
+
+# UMAP
+
+```{r umap}
+set.seed(127)
+
+gen2_umap <- umap(df_gen2) #UMAP technique
+df_gen2_umap <- as.data.frame(gen2_umap["layout"]) %>% as_tibble() #Convert to
+#dataframe and tibble
+
+plot(df_gen2_umap) #Representation
+```
+
+## kmeans
+
+```{r umap number clusters kmeans}
+#Elbow method
+elbow_kmeans_df_gen2_umap <- fviz_nbclust(df_gen2_umap, kmeans, method = "wss")
+
+#Silhoette method
+silhouette_kmeans_df_gen2_umap <- fviz_nbclust(df_gen2_umap, kmeans, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_kmeans_umap <- clusGap(df_gen2_umap, FUN = kmeans, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat_kmeans_umap)
+```
+
+```{r kmeans umap}
+#Algorithm implementation
+set.seed(127)
+
+kmeans_5_umap <- kmeans(df_gen2_umap, 5, nstart = 10)
+plot_kmeans_5_umap <- fviz_cluster(kmeans_5_umap, data = df_gen2_umap)
+
+kmeans_6_umap <- kmeans(df_gen2_umap, 6, nstart = 10)
+plot_kmeans_6_umap <- fviz_cluster(kmeans_6_umap, data = df_gen2_umap)
+
+kmeans_7_umap <- kmeans(df_gen2_umap, 7, nstart = 10)
+plot_kmeans_7_umap <- fviz_cluster(kmeans_7_umap, data = df_gen2_umap)
+
+```
+## PAM
+
+```{r umap number clusters pam}
+#Elbow method
+elbow_pam_df_gen2_umap <- fviz_nbclust(df_gen2_umap, pam, method = "wss")
+
+#Silhoette method
+silhouette_pam_df_gen2_umap <- fviz_nbclust(df_gen2_umap, pam, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_pam_umap <- clusGap(df_gen2_umap, FUN = pam, nstart = 10,
+                    K.max = 10, B = 2)
+fviz_gap_stat(gap_stat_pam_umap)
+```
+
+```{r pam umap}
+#Algorithm implementation
+set.seed(127)
+
+pam_5_umap <- pam(df_gen2_umap, 5, nstart = 10)
+plot_pam_5_umap  <- fviz_cluster(pam_5_umap, data = df_gen2_umap)
+
+pam_6_umap  <- pam(df_gen2_umap, 6, nstart = 10)
+plot_pam_6_umap  <- fviz_cluster(pam_6_umap, data = df_gen2_umap)
+
+pam_7_umap <- pam(df_gen2_umap, 7, nstart = 10)
+plot_pam_7_umap  <- fviz_cluster(pam_7_umap, data = df_gen2_umap)
+
+pam_8_umap <- pam(df_gen2_umap, 8, nstart = 10)
+plot_pam_8_umap  <- fviz_cluster(pam_8_umap, data = df_gen2_umap)
+```
+
+## CLARA
+
+```{r umap number clusters clara}
+#Elbow method
+elbow_clara_df_gen2_umap <- fviz_nbclust(df_gen2_umap, clara, method = "wss")
+
+#Silhoette method
+silhouette_clara_df_gen2_umap <- fviz_nbclust(df_gen2_umap, clara, 
+                                               method='silhouette')
+#Gap statistic
+set.seed(127)
+
+gap_stat_clara_umap <- fviz_nbclust(df_gen2_umap, FUNcluster = clara, 
+                               method = "gap_stat", k.max = 10, nboot = 2)
+
+plot(gap_stat_clara_umap)
+```
+
+```{r clara umap}
+#Algorithm implementation
+set.seed(127)
+
+clara_5_umap <- clara(df_gen2_umap, 5, samples = 10, pamLike = T)
+plot_clara_5_umap <- fviz_cluster(clara_5_umap, data = df_gen2_umap)
+
+clara_6_umap <- clara(df_gen2_umap, 6, samples = 10, pamLike = T)
+plot_clara_6_umap <- fviz_cluster(clara_6_umap, data = df_gen2_umap)
+
+clara_7_umap <- clara(df_gen2_umap, 7, samples = 10, pamLike = T)
+plot_clara_7_umap <- fviz_cluster(clara_7_umap, data = df_gen2_umap)
+
+clara_8_umap <- clara(df_gen2_umap, 8, samples = 10, pamLike = T)
+plot_clara_8_umap <- fviz_cluster(clara_8_umap, data = df_gen2_umap)
+```
+
+## DBSCAN
+
+```{r DBSCAN umap}
+
+knn_dist_df_gen2_umap_k5 <- kNNdistplot(df_gen2_umap,k=5) %>%
+  abline(h=0.3,lty = 2) #Selecting the eps value
+
+#Algorithm implementation
+
+set.seed(127)
+
+dbscan_df_gen2_umap_1 <- dbscan(df_gen2_umap, eps=0.3, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_umap_1
+plot_dbscan_df_gen2_umap_1 <- fviz_cluster(dbscan_df_gen2_umap_1, df_gen2_umap, geom = "point")
+
+dbscan_df_gen2_umap_2 <- dbscan(df_gen2_umap, eps=0.25, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_umap_2
+plot_dbscan_df_gen2_umap_2 <- fviz_cluster(dbscan_df_gen2_umap_2, df_gen2_umap, geom = "point")
+
+dbscan_df_gen2_umap_3 <- dbscan(df_gen2_umap, eps=0.37, minPts = 5, borderPoints = FALSE)
+dbscan_df_gen2_umap_3
+plot_dbscan_df_gen2_umap_3 <- fviz_cluster(dbscan_df_gen2_umap_3, df_gen2_umap, geom = "point")
+
+```
+
+## Hierarchical
+
+```{r hierarchical umap}
+#Agglomerative
+#Algorithm implementation
+agglo_df_gen2_umap_complete <- agnes(df_gen2_umap, method = "complete")
+agglo_df_gen2_umap_average <- agnes(df_gen2_umap, method = "average")
+agglo_df_gen2_umap_single <- agnes(df_gen2_umap, method = "single")
+agglo_df_gen2_umap_ward <- agnes(df_gen2_umap, method = "ward")
+
+#Agglomerative coefficient
+agglo_df_gen2_umap_complete$ac
+agglo_df_gen2_umap_average$ac
+agglo_df_gen2_umap_single$ac
+agglo_df_gen2_umap_ward$ac
+
+fviz_dend(agglo_df_gen2_umap_ward, k = 5, # Cut in four groups
+          cex = 0.5, # label size
+          color_labels_by_k = TRUE, # color labels by groups
+          rect = TRUE # Add rectangle around groups
+          ) #Representation
+
+agglo_df_gen2_umap_ward_clusters <-cutree(agglo_df_gen2_umap_ward, k = 5) #Clusters
+
+#Divisive
+div_df_gen2_umap <- diana(df_gen2_umap) #Algorithm implementation
+div_df_gen2_umap$dc #Divisive coefficient
+```
+
+## Gaussian mixture
+
+```{r gaussian mixture umap}
+
+gaussian_df_gen2_umap <- Mclust(df_gen2_umap) #Algorithm implementation
+summary(gaussian_df_gen2_umap) #summary
+ 
+fviz_mclust(gaussian_df_gen2_umap, "BIC", palette = "jco") #Model selection plot
+
+fviz_mclust(gaussian_df_gen2_umap, "classification", geom = "point", 
+            pointsize = 1.5, palette = "jco") #Representation
+
+gaussian_df_gen2_umap_clusters <- gaussian_df_gen2_umap$classification #Clusters
+```
+
+## Internal evaluation
+
+```{r Davies - Bouldin umap}
+
+DB_results_umap<- list()
+dist_df_gen2_umap <- dist(df_gen2_umap) #Distance matrix, used for calculations
+#if centrotypes = "medoids"
+
+#kmeans
+
+## k = 5
+DB_results_umap$kmeans_5 <- index.DB(df_gen2_umap, kmeans_5_umap$cluster, 
+                                     centrotypes="centroids")
+DB_results_umap$kmeans_5$DB
+
+## k = 6
+DB_results_umap$kmeans_6 <- index.DB(df_gen2_umap, kmeans_6_umap$cluster, 
+                                     centrotypes="centroids")
+DB_results_umap$kmeans_6$DB
+
+## k = 8
+DB_results_umap$kmeans_7 <- index.DB(df_gen2_umap, kmeans_7_umap$cluster, 
+                                     centrotypes="centroids")
+DB_results_umap$kmeans_7$DB
+
+#PAM
+
+## k = 5
+DB_results_umap$pam_5_umap <- index.DB(df_gen2_umap, pam_5_umap$clustering, 
+                                       dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$pam_5_umap$DB
+
+## k = 6
+DB_results_umap$pam_6_umap <- index.DB(df_gen2_umap, pam_6_umap$clustering, 
+                             dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$pam_6_umap$DB
+
+## k = 7
+DB_results_umap$pam_7_umap <- index.DB(df_gen2_umap, pam_7_umap$clustering, 
+                             dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$pam_7_umap$DB
+
+## k = 8
+DB_results_umap$pam_8_umap <- index.DB(df_gen2_umap, pam_8_umap$clustering, 
+                             dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$pam_8_umap$DB
+
+#CLARA
+
+## k = 5
+DB_results_umap$clara_5_umap <- index.DB(df_gen2_umap, clara_5_umap$clustering,
+                               dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$clara_5_umap$DB
+
+## k = 6
+DB_results_umap$clara_6_umap <- index.DB(df_gen2_umap, clara_6_umap$clustering, 
+                               dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$clara_6_umap$DB
+
+## k = 7
+DB_results_umap$clara_7_umap <- index.DB(df_gen2_umap, clara_7_umap$clustering, 
+                               dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$clara_7_umap$DB
+
+## k = 8
+DB_results_umap$clara_8_umap <- index.DB(df_gen2_umap, clara_8_umap$clustering, 
+                               dist_df_gen2_umap, centrotypes="medoids")
+DB_results_umap$clara_8_umap$DB
+
+```
+
+```{r Calinski - Harabasz umap}
+
+calinski_results_umap<- list()
+
+#kmeans
+
+## k = 5
+calinski_results_umap$kmeans_5_umap <- calinhara(df_gen2_umap, kmeans_5_umap$cluster)
+
+## k = 6
+calinski_results_umap$kmeans_6_umap <- calinhara(df_gen2_umap, kmeans_6_umap$cluster)
+
+## k = 7
+calinski_results_umap$kmeans_7_umap <- calinhara(df_gen2_umap, kmeans_7_umap$cluster)
+
+#PAM
+
+## k = 5
+calinski_results_umap$pam_5_umap <- calinhara(df_gen2_umap, pam_5_umap$clustering)
+
+## k = 6
+calinski_results_umap$pam_6_umap <- calinhara(df_gen2_umap, pam_6_umap$clustering)
+
+## k = 7
+calinski_results_umap$pam_7_umap <- calinhara(df_gen2_umap, pam_7_umap$clustering)
+
+## k = 8
+calinski_results_umap$pam_8_umap <- calinhara(df_gen2_umap, pam_8_umap$clustering)
+
+#CLARA
+
+## k = 5
+calinski_results_umap$clara_5_umap <- calinhara(df_gen2_umap, clara_5_umap$clustering)
+
+## k = 6
+calinski_results_umap$clara_6_umap <- calinhara(df_gen2_umap, clara_6_umap$clustering)
+
+## k = 7
+calinski_results_umap$clara_7_umap <- calinhara(df_gen2_umap, clara_7_umap$clustering)
+
+## k = 8
+calinski_results_umap$clara_8_umap <- calinhara(df_gen2_umap, clara_8_umap$clustering)
+
+#DBScan
+
+## 6 clusters
+calinski_results_umap$dbscan_6_umap <- calinhara(df_gen2_umap, dbscan_df_gen2_umap_1$cluster)
+
+## 7 clusters
+calinski_results_umap$dbscan_7_umap <- calinhara(df_gen2_umap, dbscan_df_gen2_umap_2$cluster)
+
+## 9 clusters
+calinski_results_umap$dbscan_9_umap <- calinhara(df_gen2_umap, dbscan_df_gen2_umap_3$cluster)
+
+# Hierarchical
+calinski_results_umap$agglo_umap <- calinhara(df_gen2_umap, agglo_df_gen2_umap_ward_clusters)
+
+# Gaussian mixture
+calinski_results_umap$gaussian_umap <- calinhara(df_gen2_umap, gaussian_df_gen2_umap$classification)
+```
+
+```{r clValid umap}
+
+df_gen2_umap <- data.frame(df_gen2_umap) #Convert to dataframe
+
+#Internal
+
+clValid_results_umap <- clValid(df_gen2_umap, nClust = 5:8,
+              clMethods = c("kmeans", "pam", "clara", "agnes", "model"),
+              validation = "internal", maxitems = 801) #Internal evaluation
+summary(clValid_results_umap) #Summary of the internal parameters
+
+#Connectivity dbscan
+
+# 6 clusters
+connectivity(distance = dist_df_gen2_umap, dbscan_df_gen2_umap_3$cluster, 
+             Data = df_gen2_umap)
+# 7 clusters
+connectivity(distance = dist_df_gen2_umap, dbscan_df_gen2_umap_1$cluster, 
+             Data = df_gen2_umap)
+# 9 clusters
+connectivity(distance = dist_df_gen2_umap, dbscan_df_gen2_umap_2$cluster, 
+             Data = df_gen2_umap)
+#Dunn dbscan
+
+# 6 clusters
+dunn(dist_df_gen2_umap, dbscan_df_gen2_umap_3$cluster, df_gen2_umap)
+
+# 7 clusters
+dunn(dist_df_gen2_umap, dbscan_df_gen2_umap_1$cluster, df_gen2_umap)
+
+# 9 clusters
+dunn(dist_df_gen2_umap, dbscan_df_gen2_umap_2$cluster, df_gen2_umap)
+
+#Silhouette dbscan
+
+# 6 clusters
+summary(silhouette(dbscan_df_gen2_umap_3$cluster, dist_df_gen2_umap))
+
+# 7 clusters
+summary(silhouette(dbscan_df_gen2_umap_1$cluster, dist_df_gen2_umap))
+
+# 9 clusters
+summary(silhouette(dbscan_df_gen2_umap_2$cluster, dist_df_gen2_umap))
+```
+
+```{r stability umap}
+#Stability evaluations of the best algorithms
+rownames(df_gen2_umap) <- c(1:801) #Add row names
+clValid_stability_umap <- clValid(data.frame(df_gen2_umap), nClust = 5,
+              clMethods = c("kmeans", "pam", "clara", "hierarchical"),
+              validation = "stability") #Stability evaluation
+summary(clValid_stability_umap) #Summary of the stability parameters
+```
+
+## Classification assessment
+
+``` {r kmeans classification evaluation umap}
+#Classification function implementation
+## k = 5
+labels_kmeans_5_umap <- data.frame("samples" = samples, "class" = kmeans_5_umap$cluster)
+labels_kmeans_5_umap$class <- as.factor(labels_kmeans_5_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_5_umap), "classification/umap_kmeans_5.xlsx")
+
+## k = 6
+labels_kmeans_6_umap <- data.frame("samples" = samples, "class" = kmeans_6_umap$cluster)
+labels_kmeans_6_umap$class <- as.factor(labels_kmeans_6_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_6_umap), "classification/umap_kmeans_6.xlsx")
+
+## k = 7
+labels_kmeans_7_umap <- data.frame("samples" = samples, "class" = kmeans_7_umap$cluster)
+labels_kmeans_7_umap$class <- as.factor(labels_kmeans_7_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_kmeans_7_umap), "classification/umap_kmeans_7.xlsx")
+
+```
+
+``` {r pam classification evaluation umap}
+#Classification function implementation
+## k = 5
+labels_pam_5_umap <- data.frame("samples" = samples, "class" = pam_5_umap$cluster)
+labels_pam_5_umap$class <- as.factor(labels_pam_5_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_5_umap), "classification/umap_pam_5.xlsx")
+
+## k = 6
+labels_pam_6_umap <- data.frame("samples" = samples, "class" = pam_6_umap$cluster)
+labels_pam_6_umap$class <- as.factor(labels_pam_6_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_6_umap), "classification/umap_pam_6.xlsx")
+
+## k = 7
+labels_pam_7_umap <- data.frame("samples" = samples, "class" = pam_7_umap$cluster)
+labels_pam_7_umap$class <- as.factor(labels_pam_7_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_7_umap), "classification/umap_pam_7.xlsx")
+
+## k = 8
+labels_pam_8_umap <- data.frame("samples" = samples, "class" = pam_8_umap$cluster)
+labels_pam_8_umap$class <- as.factor(labels_pam_8_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_pam_8_umap), "classification/umap_pam_8.xlsx")
+
+```
+
+``` {r clara classification evaluation umap}
+#Classification function implementation
+## k = 5
+labels_clara_5_umap <- data.frame("samples" = samples, "class" = clara_5_umap$cluster)
+labels_clara_5_umap$class <- as.factor(labels_clara_5_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_5_umap), "classification/umap_clara_5.xlsx")
+
+## k = 6
+labels_clara_6_umap <- data.frame("samples" = samples, "class" = clara_6_umap$cluster)
+labels_clara_6_umap$class <- as.factor(labels_clara_6_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_6_umap), "classification/umap_clara_6.xlsx")
+
+## k = 7
+labels_clara_7_umap <- data.frame("samples" = samples, "class" = clara_7_umap$cluster)
+labels_clara_7_umap$class <- as.factor(labels_clara_7_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_7_umap), "classification/umap_clara_7.xlsx")
+
+## k = 8
+labels_clara_8_umap <- data.frame("samples" = samples, "class" = clara_8_umap$cluster)
+labels_clara_8_umap$class <- as.factor(labels_clara_8_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_clara_8_umap), "classification/umap_clara_8.xlsx")
+```
+
+``` {r DBScan classification evaluation umap}
+#Classification function implementation
+# 6 clusters
+labels_dbscan_6_umap <- data.frame("samples" = samples, "class" = dbscan_df_gen2_umap_3$cluster)
+labels_dbscan_6_umap$class <- as.factor(labels_dbscan_6_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_6_umap), "classification/umap_dbscan_6.xlsx")
+
+# 7 clusters
+labels_dbscan_7_umap <- data.frame("samples" = samples, "class" = dbscan_df_gen2_umap_1$cluster)
+labels_dbscan_7_umap$class <- as.factor(labels_dbscan_7_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_7_umap), "classification/umap_dbscan_7.xlsx")
+
+#9 clusters
+
+labels_dbscan_9_umap <- data.frame("samples" = samples, "class" = dbscan_df_gen2_umap_2$cluster)
+labels_dbscan_9_umap$class <- as.factor(labels_dbscan_9_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_dbscan_9_umap), "classification/umap_dbscan_9.xlsx")
+```
+
+``` {r hierarchical classification evaluation umap}
+#Classification function implementation
+labels_agglo_umap <- data.frame("samples" = samples, "class" = agglo_df_gen2_umap_ward_clusters)
+labels_agglo_umap$class <- as.factor(labels_agglo_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_agglo_umap), "classification/umap_agglo.xlsx")
+
+```
+
+``` {r gaussian classification evaluation umap}
+#Classification function implementation
+labels_gaussian_umap <- data.frame("samples" = samples, "class" = gaussian_df_gen2_umap$classification)
+labels_gaussian_umap$class <- as.factor(labels_gaussian_umap$class)
+
+write.xlsx(classification_function(df_labels, labels_gaussian_umap), "classification/umap_gaussian.xlsx")
+
+```

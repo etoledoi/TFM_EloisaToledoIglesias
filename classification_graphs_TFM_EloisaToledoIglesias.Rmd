@@ -1,0 +1,472 @@
+---
+title: "Classification graphs"
+author: "Eloísa Toledo Iglesias"
+date: "`r Sys.Date()`"
+output: html_document
+---
+```{r library}
+
+library(readxl)
+library(ggplot2)
+library(tibble)
+library(ggrepel)
+```
+
+# PCA95
+
+```{r data pca95 kmeans}
+pca95_kmeans <- read_excel("classification/graphs/pca95_kmeans.xlsx") %>% as_tibble()
+pca95_kmeans$origin <- as.factor(pca95_kmeans$origin)
+levels(pca95_kmeans$origin)
+pca95_kmeans$origin <- factor(pca95_kmeans$origin, levels=c('original_data', 'kmeans_k3', 'kmeans_k5', 'kmeans_k6', 'kmeans_k8'))
+```
+
+```{r kmeans pca95}
+
+ggplot(pca95_kmeans, main = kmeans) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_kmeans$cluster),breaks=pca95_kmeans$cluster) +
+  ggtitle("kmeans") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("kmeans_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca95 pam}
+pca95_pam <- read_excel("classification/graphs/pca95_pam.xlsx") %>% as_tibble()
+pca95_pam$origin <- as.factor(pca95_pam$origin)
+levels(pca95_pam$origin)
+pca95_pam$origin <- factor(pca95_pam$origin, levels=c('original_data', 'pam_k3', 'pam_k5', 'pam_k6', 'pam_k8'))
+```
+
+```{r pam pca95}
+
+ggplot(pca95_pam) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_pam$cluster),breaks=pca95_pam$cluster)+
+  ggtitle("PAM") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("pam_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca95 clara}
+pca95_clara <- read_excel("classification/graphs/pca95_clara.xlsx") %>% as_tibble()
+pca95_clara$origin <- as.factor(pca95_clara$origin)
+levels(pca95_clara$origin)
+pca95_clara$origin <- factor(pca95_clara$origin, levels=c('original_data', 'clara_k3', 'clara_k5', 'clara_k6', 'clara_k7', 'clara_k8'))
+```
+
+```{r clara pca95}
+
+ggplot(pca95_clara) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_clara$cluster),breaks=pca95_clara$cluster) +
+  ggtitle("CLARA") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("clara_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca95 dbscan}
+pca95_dbscan <- read_excel("classification/graphs/pca95_dbscan.xlsx") %>% as_tibble()
+pca95_dbscan$origin <- as.factor(pca95_dbscan$origin)
+levels(pca95_dbscan$origin)
+pca95_dbscan$origin <- factor(pca95_dbscan$origin, levels=c('original_data', 'DBSCAN_eps175', 'DBSCAN_eps161', 'DBSCAN_eps171', 'DBSCAN_eps165'))
+```
+
+```{r dbscan pca95}
+
+ggplot(pca95_dbscan) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_dbscan$cluster),breaks=pca95_dbscan$cluster) +
+  ggtitle("DBSCAN") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("dbscan_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca95 agnes}
+pca95_agnes <- read_excel("classification/graphs/pca95_agnes.xlsx") %>% as_tibble()
+pca95_agnes$origin <- as.factor(pca95_agnes$origin)
+levels(pca95_agnes$origin)
+pca95_agnes$origin <- factor(pca95_agnes$origin, levels=c('original_data', 'agnes_k5'))
+```
+
+```{r agnes pca95}
+
+ggplot(pca95_agnes) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_agnes$cluster),breaks=pca95_agnes$cluster)+
+  ggtitle("Hierarchical") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("agnes_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca95 gaussian}
+pca95_gaussian <- read_excel("classification/graphs/pca95_gaussian.xlsx") %>% as_tibble()
+pca95_gaussian$origin <- as.factor(pca95_gaussian$origin)
+levels(pca95_gaussian$origin)
+pca95_gaussian$origin <- factor(pca95_gaussian$origin, levels=c('original_data', 'gaussian_mixture_k9'))
+```
+
+```{r gaussian pca95}
+
+ggplot(pca95_gaussian) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca95_gaussian$cluster),breaks=pca95_gaussian$cluster) +
+  ggtitle("Gaussian Mixture") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("gaussian_pca95_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+```{r pca95 best results}
+
+#Filtering data k-means
+pca_kmeans_best <- pca95_kmeans[pca95_kmeans$origin %in% c("original_data", "kmeans_k5", "kmeans_k8"),]
+
+#Plot
+ggplot(pca_kmeans_best, main = kmeans) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca_kmeans_best$cluster),breaks=pca_kmeans_best$cluster) +
+  ggtitle("k-means") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("best_kmeans_pca95_graph.png", width = 8, height = 4, path = "classification/graphs")
+
+#Filtering data pam
+
+pca_pam_best <- pca95_pam[pca95_pam$origin %in% c("original_data", "pam_k6", "pam_k8"),]
+
+#Plot
+
+ggplot(pca_pam_best) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca_pam_best$cluster),breaks=pca_pam_best$cluster)+
+  ggtitle("PAM") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("best_pam_pca95_graph.png", width = 8, height = 4, path = "classification/graphs")
+```
+
+# PCA800
+
+```{r data pca800 kmeans}
+pca800_kmeans <- read_excel("classification/graphs/pca800_kmeans.xlsx") %>% as_tibble()
+pca800_kmeans$origin <- as.factor(pca800_kmeans$origin)
+levels(pca800_kmeans$origin)
+pca800_kmeans$origin <- factor(pca800_kmeans$origin, levels=c('original_data', 'kmeans_k5', 'kmeans_k6', 'kmeans_k9'))
+```
+
+```{r kmeans pca800}
+
+ggplot(pca800_kmeans) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_kmeans$cluster),breaks=pca800_kmeans$cluster)+
+  ggtitle("kmeans") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("kmeans_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca800 pam}
+pca800_pam <- read_excel("classification/graphs/pca800_pam.xlsx") %>% as_tibble()
+pca800_pam$origin <- as.factor(pca800_pam$origin)
+levels(pca800_pam$origin)
+pca800_pam$origin <- factor(pca800_pam$origin, levels=c('original_data', 'pam_k5', 'pam_k6', 'pam_k7', 'pam_k8'))
+```
+
+```{r pam pca800}
+
+ggplot(pca800_pam) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_pam$cluster),breaks=pca800_pam$cluster)+
+  ggtitle("PAM") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("pam_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca800 clara}
+pca800_clara <- read_excel("classification/graphs/pca800_clara.xlsx") %>% as_tibble()
+pca800_clara$origin <- as.factor(pca800_clara$origin)
+levels(pca800_clara$origin)
+pca800_clara$origin <- factor(pca800_clara$origin, levels=c('original_data', 'clara_k5', 'clara_k6', 'clara_k7', 'clara_k8'))
+```
+
+```{r clara pca800}
+
+ggplot(pca800_clara) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_clara$cluster),breaks=pca800_clara$cluster) +
+  ggtitle("CLARA") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("clara_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca800 dbscan}
+pca800_dbscan <- read_excel("classification/graphs/pca800_dbscan.xlsx") %>% as_tibble()
+pca800_dbscan$origin <- as.factor(pca800_dbscan$origin)
+levels(pca800_dbscan$origin)
+pca800_dbscan$origin <- factor(pca800_dbscan$origin, levels=c('original_data', 'DBSCAN_eps85', 'DBSCAN_eps80', 'DBSCAN_eps97'))
+```
+
+```{r dbscan pca800}
+
+ggplot(pca800_dbscan) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_dbscan$cluster),breaks=pca800_dbscan$cluster) +
+  ggtitle("DBSCAN") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("dbscan_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca800 agnes}
+pca800_agnes <- read_excel("classification/graphs/pca800_agnes.xlsx") %>% as_tibble()
+pca800_agnes$origin <- as.factor(pca800_agnes$origin)
+levels(pca800_agnes$origin)
+pca800_agnes$origin <- factor(pca800_agnes$origin, levels=c('original_data', 'agnes_k6'))
+```
+
+```{r agnes pca800}
+
+ggplot(pca800_agnes) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_agnes$cluster),breaks=pca800_agnes$cluster) +
+  ggtitle("Hierarchical") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("agnes_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data pca800 gaussian}
+pca800_gaussian <- read_excel("classification/graphs/pca800_gaussian.xlsx") %>% as_tibble()
+pca800_gaussian$origin <- as.factor(pca800_gaussian$origin)
+levels(pca800_gaussian$origin)
+pca800_gaussian$origin <- factor(pca800_gaussian$origin, levels=c('original_data', 'gaussian_mixture_k7'))
+```
+
+```{r gaussian pca800}
+
+ggplot(pca800_gaussian) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+    geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca800_gaussian$cluster),breaks=pca800_gaussian$cluster) +
+  ggtitle("Gaussian Mixture") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("gaussian_pca800_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r pca800 best results}
+
+#Filtering data clara
+
+pca_clara_best_800 <- pca800_clara[pca800_clara$origin %in% c("original_data", "clara_k5"),]
+
+#Plot
+
+ggplot(pca_clara_best_800) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "y") +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(pca_clara_best_800$cluster),breaks=pca_clara_best_800$cluster)+
+  ggtitle("CLARA") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("best_pam_pca800_graph.png", width = 8, height = 4, path = "classification/graphs")
+```
+
+# UMAP
+
+```{r data umap kmeans}
+umap_kmeans <- read_excel("classification/graphs/umap_kmeans.xlsx") %>% as_tibble()
+umap_kmeans$origin <- as.factor(umap_kmeans$origin)
+levels(umap_kmeans$origin)
+umap_kmeans$origin <- factor(umap_kmeans$origin, levels=c('original_data', 'kmeans_k5', 'kmeans_k6', 'kmeans_k7'))
+```
+
+```{r kmeans umap}
+
+ggplot(umap_kmeans) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_kmeans$cluster),breaks=umap_kmeans$cluster)+
+  ggtitle("k-means") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("kmeans_umap_graph.png", width = 8, height = 5.5, path = "classification/graphs")
+```
+
+```{r data umap pam}
+umap_pam <- read_excel("classification/graphs/umap_pam.xlsx") %>% as_tibble()
+umap_pam$origin <- as.factor(umap_pam$origin)
+levels(umap_pam$origin)
+umap_pam$origin <- factor(umap_pam$origin, levels=c('original_data', 'pam_k5', 'pam_k6', 'pam_k7', 'pam_k8'))
+```
+
+```{r pam umap}
+
+ggplot(umap_pam) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_pam$cluster),breaks=umap_pam$cluster)+
+  ggtitle("PAM") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("pam_umap_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data umap clara}
+umap_clara <- read_excel("classification/graphs/umap_clara.xlsx") %>% as_tibble()
+umap_clara$origin <- as.factor(umap_clara$origin)
+levels(umap_clara$origin)
+umap_clara$origin <- factor(umap_clara$origin, levels=c('original_data', 'clara_k5', 'clara_k6', 'clara_k7', 'clara_k8'))
+```
+
+```{r clara umap}
+
+ggplot(umap_clara) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin, ncol = 3) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_clara$cluster),breaks=umap_clara$cluster)+
+  ggtitle("CLARA") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("clara_umap_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data umap dbscan}
+umap_dbscan <- read_excel("classification/graphs/umap_dbscan.xlsx") %>% as_tibble()
+umap_dbscan$origin <- as.factor(umap_dbscan$origin)
+levels(umap_dbscan$origin)
+umap_dbscan$origin <- factor(umap_dbscan$origin, levels=c('original_data', 'DBSCAN_eps0.37', 'DBSCAN_eps0.3', 'DBSCAN_eps0.25'))
+```
+
+```{r dbscan umap}
+
+ggplot(umap_dbscan) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text_repel(aes(x = cluster, y=coincidences, label=coincidences, vjust = -0.2), 
+            color = "black", size=2, direction = "both") +
+  facet_wrap(~ origin, ncol = 2) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_dbscan$cluster),breaks=umap_dbscan$cluster) +
+  ggtitle("DBSCAN") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("dbscan_umap_graph.png", width = 8, height = 6, path = "classification/graphs")
+```
+
+```{r data umap agnes}
+umap_agnes <- read_excel("classification/graphs/umap_agnes.xlsx") %>% as_tibble()
+umap_agnes$origin <- as.factor(umap_agnes$origin)
+levels(umap_agnes$origin)
+umap_agnes$origin <- factor(umap_agnes$origin, levels=c('original_data', 'agnes_k5'))
+```
+
+```{r agnes umap}
+
+ggplot(umap_agnes) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_agnes$cluster),breaks=umap_agnes$cluster) +
+  ggtitle("Hierarchical") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("agnes_umap_graph.png", width = 8, height = 4, path = "classification/graphs")
+```
+
+```{r data umap gaussian}
+umap_gaussian <- read_excel("classification/graphs/umap_gaussian.xlsx") %>% as_tibble()
+umap_gaussian$origin <- as.factor(umap_gaussian$origin)
+levels(umap_gaussian$origin)
+umap_gaussian$origin <- factor(umap_gaussian$origin, levels=c('original_data', 'gaussian_mixture_k6'))
+```
+
+```{r gaussian umap}
+
+ggplot(umap_gaussian) +
+  geom_bar(aes(x = cluster, y = coincidences, fill = labels_data),
+           position = "stack",
+           stat = "identity") +
+  geom_text(aes(x = cluster, y=coincidences, label=coincidences), vjust = -0.2, 
+            color = "black", size=2.8) +
+  facet_wrap(~ origin) + theme_bw() +
+  scale_x_continuous(labels=as.character(umap_gaussian$cluster),breaks=umap_gaussian$cluster) +
+  ggtitle("Gaussian Mixture") + theme(plot.title = element_text(hjust = 0.5))
+
+ggsave("gaussian_umap_graph.png", width = 8, height = 4, path = "classification/graphs")
+```
