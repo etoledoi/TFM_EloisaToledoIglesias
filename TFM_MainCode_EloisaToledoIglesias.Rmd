@@ -1746,3 +1746,90 @@ labels_gaussian_umap$class <- as.factor(labels_gaussian_umap$class)
 write.xlsx(classification_function(df_labels, labels_gaussian_umap), "classification/umap_gaussian.xlsx")
 
 ```
+
+```{r k-means cluster distribution}
+kmeans_5_clusterdf <- as.data.frame(kmeans_5_umap$cluster) %>% as_tibble() %>%
+  rownames_to_column(var = "observations") #Convert the clusters identification
+#vector from the algorithm in dataframe
+df_gen_kmeans_5 <- df_gen[,-1] %>%
+  rownames_to_column(var = "observations") %>%
+  inner_join(kmeans_5_clusterdf, by = "observations") #Merge the cluster identification
+#with the original dataframe
+  
+df_gen_kmeans_5$`kmeans_5_umap$cluster` <- 
+  as.factor(df_gen_kmeans_5$`kmeans_5_umap$cluster`) #Convert variable to
+#factor
+
+#Divide the dataframe by clusters into five different dataframes
+#Cluster 1
+df_gen_kmeans_5_c1 <- df_gen_kmeans_5[df_gen_kmeans_5$`kmeans_5_umap$cluster` == 1 ,]
+#Delete first and last variable
+df_gen_kmeans_5_c1 <- df_gen_kmeans_5_c1[, -c(1, ncol(df_gen_kmeans_5_c1))] 
+
+#Cluster 
+df_gen_kmeans_5_c2 <- df_gen_kmeans_5[df_gen_kmeans_5$`kmeans_5_umap$cluster` == 2 ,]
+#Delete first and last variable
+df_gen_kmeans_5_c2 <- df_gen_kmeans_5_c2[, -c(1, ncol(df_gen_kmeans_5_c2))]
+
+#Cluster 3
+df_gen_kmeans_5_c3 <- df_gen_kmeans_5[df_gen_kmeans_5$`kmeans_5_umap$cluster` == 3 ,]
+#Delete first and last variable
+df_gen_kmeans_5_c3 <- df_gen_kmeans_5_c3[, -c(1, ncol(df_gen_kmeans_5_c3))]
+
+#Cluster 4
+df_gen_kmeans_5_c4 <- df_gen_kmeans_5[df_gen_kmeans_5$`kmeans_5_umap$cluster` == 4 ,]
+#Delete first and last variable
+df_gen_kmeans_5_c4 <- df_gen_kmeans_5_c4[, -c(1, ncol(df_gen_kmeans_5_c4))]
+
+#Cluster 5
+df_gen_kmeans_5_c5 <- df_gen_kmeans_5[df_gen_kmeans_5$`kmeans_5_umap$cluster` == 5 ,]
+#Delete first and last variable
+df_gen_kmeans_5_c5 <- df_gen_kmeans_5_c5[, -c(1, ncol(df_gen_kmeans_5_c5))]
+
+#Statistic Summary
+
+summary_stats_kmeansk5_c1 <- data.frame(
+    mean = apply(df_gen_kmeans_5_c1, 1, mean),
+    median = apply(df_gen_kmeans_5_c1, 1, median)) %>%
+  mutate(cluster = rep(1, times = 136))#Stats summary
+
+summary_stats_kmeansk5_c2 <- data.frame(
+    mean = apply(df_gen_kmeans_5_c2, 1, mean),
+    median = apply(df_gen_kmeans_5_c2, 1, median))  %>%
+  mutate(cluster = rep(2, times = 301)) #Stats summary
+
+summary_stats_kmeansk5_c3 <- data.frame(
+    mean = apply(df_gen_kmeans_5_c3, 1, mean),
+    median = apply(df_gen_kmeans_5_c3, 1, median)) %>%
+  mutate(cluster = rep(3, times = 140)) #Stats summary
+
+summary_stats_kmeansk5_c4 <- data.frame(
+    mean = apply(df_gen_kmeans_5_c4, 1, mean),
+    median = apply(df_gen_kmeans_5_c4, 1, median)) %>%
+  mutate(cluster = rep(4, times = 78)) #Stats summary
+summary_stats_kmeansk5_c5 <- data.frame(
+    mean = apply(df_gen_kmeans_5_c5, 1, mean),
+    median = apply(df_gen_kmeans_5_c5, 1, median)) %>%
+  mutate(cluster = rep(5, times = 146)) #Stats summary
+
+summary_stats_kmeansk5 <- rbind(summary_stats_kmeansk5_c1, 
+                                summary_stats_kmeansk5_c2, 
+                                summary_stats_kmeansk5_c3, 
+                                summary_stats_kmeansk5_c4, 
+                                summary_stats_kmeansk5_c5) #Join all the summaries
+#Convert cluster to factor
+summary_stats_kmeansk5$cluster <- as.factor(summary_stats_kmeansk5$cluster)
+
+#Boxplot for the mean
+ggplot(summary_stats_kmeansk5, aes(x = cluster, y = mean, fill = cluster)) +
+  geom_boxplot() +theme_bw() +
+  ggtitle("Mean") + theme(plot.title = element_text(hjust = 0.5)) + 
+  labs(y = "Gene expression mean", x = "Clusters", fill = "Clusters")
+
+#Boxplot for the median
+ggplot(summary_stats_kmeansk5, aes(x = cluster, y = median, fill = cluster)) +
+  geom_boxplot() +theme_bw() +
+  ggtitle("Median") + theme(plot.title = element_text(hjust = 0.5)) + 
+  labs(y = "Gene expression median", x = "Clusters", fill = "Clusters")
+
+```
